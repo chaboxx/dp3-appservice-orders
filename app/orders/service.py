@@ -4,8 +4,7 @@ No importa nada de FastAPI: no sabe de requests ni de códigos HTTP. Los errores
 como excepciones de dominio (ver `exceptions.py`) y `app/errors.py` las traduce a HTTP.
 """
 
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from app.orders.constants import OrderStatus
 from app.orders.exceptions import OrderNotFound
@@ -19,12 +18,12 @@ class OrderService:
         self._repository = repository
 
     def create(self, data: OrderCreate) -> Order:
+        # id y timestamps los genera la base de datos al guardar (NEWSEQUENTIALID, SYSUTCDATETIME)
         order = Order(
-            id=uuid4(),
-            customer_id=data.customer_id,
+            user_id=data.user_id,
             total=data.total,
+            payment_type=data.payment_type,
             status=OrderStatus.PENDING,
-            created_at=datetime.now(UTC),
         )
         self._repository.add(order)
         return order

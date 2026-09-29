@@ -18,6 +18,7 @@ Hay dos entornos, `dev` y `prod`. La app lee su configuración **solo de variabl
 | `APP_ENV`          | `dev`   | `prod`  | Nombre del entorno                   |
 | `APP_LOG_LEVEL`    | `DEBUG` | `INFO`  | Nivel de logs                        |
 | `APP_DOCS_ENABLED` | `true`  | `false` | Expone `/docs` y `/openapi.json`     |
+| `APP_AUTH_*`       |         |         | Tenants de Entra en los que confía la API (ver abajo) |
 
 Las plantillas `.env.dev.example` y `.env.prod.example` se suben a git. Las copias reales
 (`.env.dev`, `.env.prod`) no, porque ahí podrían terminar secretos:
@@ -26,6 +27,20 @@ Las plantillas `.env.dev.example` y `.env.prod.example` se suben a git. Las copi
 cp .env.dev.example .env.dev
 cp .env.prod.example .env.prod
 ```
+
+### Autenticación (Entra ID / Entra External ID)
+
+La API valida access tokens (JWT) de dos tenants: **clientes** (tenant externo, Entra External ID)
+y **staff** (tenant workforce). Cada uno se configura con 3 variables, ninguna es secreta:
+
+| Variable                          | De dónde sale                                                  |
+|-----------------------------------|----------------------------------------------------------------|
+| `APP_AUTH_CUSTOMERS_ISSUER`       | campo `issuer` del `.well-known/openid-configuration` del tenant |
+| `APP_AUTH_CUSTOMERS_JWKS_URI`     | campo `jwks_uri` del mismo documento                           |
+| `APP_AUTH_CUSTOMERS_AUDIENCE`     | client ID de la app registration de la API                     |
+| `APP_AUTH_STAFF_*`                | lo mismo, para el tenant workforce                             |
+
+Sin ninguna configurada, la API arranca pero rechaza todos los tokens (401).
 
 En Azure no se usan archivos: las variables se configuran como **App Settings** de la Web App
 (y los secretos como referencias a Key Vault).
@@ -95,6 +110,13 @@ app/
   main.py              # create_app(): arma la app (handlers, routers). Sin lógica de negocio
   config.py            # configuración global (variables de entorno)
   errors.py            # Problem Details (RFC 9457) + DomainError, base de los errores de negocio
+  database.py          # Base de SQLAlchemy + created_at/updated_at comunes
+  auth/                # ¿el token es válido? ¿quién es según Entra? (no usa la base de datos)
+    config.py          # tenants de confianza (APP_AUTH_*)
+    validator.py       # TokenValidator: firma (JWKS), iss, aud, exp, tid/oid
+    dependencies.py    # CurrentPrincipal, require_scope(...), require_role(...)
+    schemas.py         # Principal: kind (customer/staff), tenant_id, object_id, scopes, roles
+    exceptions.py      # 401 (WWW-Authenticate: Bearer) y 403
   health/
     router.py          # GET /health
   orders/
@@ -102,12 +124,15 @@ app/
     schemas.py         # contrato de la API (Pydantic): OrderCreate, OrderRead
     service.py         # reglas de negocio; no importa FastAPI
     repository.py      # acceso a datos: Protocol + implementación en memoria
-    models.py          # cómo se guarda una orden (hoy dataclass; mañana tabla ORM)
+    models.py          # tablas ORM Products, Orders y OrderItem (reflejan el DDL)
     dependencies.py    # inyección: service, validar que la orden exista (404)
     exceptions.py      # errores de negocio (OrderNotFound → 404)
     constants.py       # OrderStatus
+  users/models.py      # tabla ORM Users (vinculada a Entra por tenant id + object id)
 tests/                 # sigue la misma estructura que app/
   conftest.py          # fixture `client` con una app nueva por test
+  test_database.py     # los modelos ORM siguen alineados con el DDL
+  auth/                # tokens firmados con una clave RSA local: sin Entra ni red
   health/
   orders/              # test_router.py (HTTP) y test_service.py (unitarios, sin HTTP)
 .env.*.example         # plantillas de variables por entorno

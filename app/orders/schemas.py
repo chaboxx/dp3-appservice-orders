@@ -13,15 +13,19 @@ from app.orders.constants import OrderStatus
 
 
 class OrderCreate(BaseModel):
-    customer_id: str = Field(min_length=1, max_length=64)
+    # Temporal: cuando la API valide tokens de Entra, user_id saldrá del token y no del body
+    user_id: UUID
     total: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    payment_type: str | None = Field(default=None, max_length=100)
 
 
 class OrderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    customer_id: str
+    user_id: UUID
     total: Decimal
+    payment_type: str | None
     status: OrderStatus
     created_at: datetime
+    updated_at: datetime

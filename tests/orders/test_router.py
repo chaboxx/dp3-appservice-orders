@@ -5,14 +5,16 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 URL = "/api/v1/orders"
+USER_1 = "11111111-1111-1111-1111-111111111111"
+USER_2 = "22222222-2222-2222-2222-222222222222"
 
 
 def test_create_and_get_order(client: TestClient) -> None:
-    created = client.post(URL, json={"customer_id": "c-1", "total": "10.50"})
+    created = client.post(URL, json={"user_id": USER_1, "total": "10.50"})
 
     assert created.status_code == 201
     body = created.json()
-    assert body["customer_id"] == "c-1"
+    assert body["user_id"] == USER_1
     assert body["total"] == "10.50"
     assert body["status"] == "pending"
 
@@ -23,13 +25,13 @@ def test_create_and_get_order(client: TestClient) -> None:
 
 
 def test_list_orders(client: TestClient) -> None:
-    client.post(URL, json={"customer_id": "c-1", "total": "1.00"})
-    client.post(URL, json={"customer_id": "c-2", "total": "2.00"})
+    client.post(URL, json={"user_id": USER_1, "total": "1.00"})
+    client.post(URL, json={"user_id": USER_2, "total": "2.00"})
 
     response = client.get(URL)
 
     assert response.status_code == 200
-    assert [o["customer_id"] for o in response.json()] == ["c-1", "c-2"]
+    assert [o["user_id"] for o in response.json()] == [USER_1, USER_2]
 
 
 def test_get_missing_order_returns_problem_details(client: TestClient) -> None:
@@ -49,7 +51,7 @@ def test_get_missing_order_returns_problem_details(client: TestClient) -> None:
 
 
 def test_create_order_rejects_invalid_total(client: TestClient) -> None:
-    response = client.post(URL, json={"customer_id": "c-1", "total": "-5"})
+    response = client.post(URL, json={"user_id": USER_1, "total": "-5"})
 
     assert response.status_code == 422
     assert response.headers["content-type"] == "application/problem+json"

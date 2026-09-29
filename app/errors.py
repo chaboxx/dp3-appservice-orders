@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 class DomainError(Exception):
     """Base de los errores de negocio de cada módulo (p. ej. `OrderNotFound`).
 
-    Los services la lanzan sin saber de HTTP; cada subclase define su `status_code`.
+    Los services la lanzan sin saber de HTTP; cada subclase define su `status_code`
+    (y `headers` si la respuesta los necesita, p. ej. WWW-Authenticate en un 401).
     """
 
     status_code: int = 400
+    headers: dict[str, str] | None = None
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -67,7 +69,7 @@ async def validation_exception_handler(
 
 async def domain_exception_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Errores controlados: reglas de negocio que lanzan los services."""
-    return problem(request, exc.status_code, exc.detail)
+    return problem(request, exc.status_code, exc.detail, headers=exc.headers)
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

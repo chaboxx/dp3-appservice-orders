@@ -1,0 +1,201 @@
+{
+  "info": {
+    "name": "dp3-appservice-orders",
+    "description": "Pruebas de la API de órdenes desplegada en Azure App Service.\n\nAntes de usarla, cambia la variable `baseUrl` (pestaña Variables de la colección) por la URL de tu Web App.\n\nEjecuta las requests en orden: \"Crear orden\" guarda el `orderId` que usa \"Obtener orden\".",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://<nombre-webapp>.azurewebsites.net",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con status ok', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "Raíz (entorno)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 en prod', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().env).to.eql('prod');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Crear orden",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 201 y la orden queda pending', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(pm.response.json().status).to.eql('pending');",
+                  "});",
+                  "",
+                  "// Guarda el id para usarlo en \"Obtener orden\"",
+                  "pm.collectionVariables.set('orderId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"11111111-1111-1111-1111-111111111111\",\n  \"total\": \"10.50\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/orders"
+          }
+        },
+        {
+          "name": "Listar órdenes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con una lista', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/orders"
+          }
+        },
+        {
+          "name": "Obtener orden",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con la orden creada', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('orderId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}"
+          }
+        },
+        {
+          "name": "Obtener orden inexistente (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 404 en formato Problem Details', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/orders/00000000-0000-0000-0000-000000000000"
+          }
+        },
+        {
+          "name": "Crear orden inválida (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 422 en formato Problem Details', () => {",
+                  "    pm.response.to.have.status(422);",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"11111111-1111-1111-1111-111111111111\",\n  \"total\": \"-5\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/orders"
+          }
+        }
+      ]
+    }
+  ]
+}
