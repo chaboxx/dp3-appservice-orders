@@ -1,5 +1,10 @@
 FROM python:3.14-slim
 
+# Librerías del sistema que necesita el driver de SQL Server (mssql-python)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libltdl7 libkrb5-3 libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+
 # uv como binario, copiado desde su imagen oficial
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 

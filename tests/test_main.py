@@ -40,3 +40,11 @@ def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert settings.env == "prod"
     assert settings.docs_enabled is False
+
+
+def test_starts_without_database(caplog: pytest.LogCaptureFixture) -> None:
+    # `with` ejecuta el arranque (lifespan), que es donde se prueba la conexión
+    with TestClient(create_app(Settings())) as client:
+        assert client.get("/health").status_code == 200
+
+    assert "Database not configured" in caplog.text

@@ -1,8 +1,11 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.config import Settings, get_settings
+from app.database import build_engine, check_database
 from app.errors import register_exception_handlers
 from app.health.router import router as health_router
 from app.orders.repository import InMemoryOrderRepository
@@ -19,9 +22,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     logging.basicConfig(level=logging.INFO)
     logging.getLogger("app").setLevel(settings.log_level)
 
+    engine = build_engine(settings)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Al arrancar: el resultado de la conexión a la base queda en los logs
+        check_database(engine)
+        yield
+        if engine is not None:
+            engine.dispose()
+
     app = FastAPI(
         title="dp3-appservice-orders",
-        version="0.1.0",
+        version="0.2.0",
+        lifespan=lifespan,
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url="/redoc" if settings.docs_enabled else None,
         openapi_url="/openapi.json" if settings.docs_enabled else None,
@@ -30,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Dependencias compartidas por request (ver app/orders/dependencies.py)
     app.state.order_repository = InMemoryOrderRepository()
+    app.state.db_engine = engine
 
     @app.get("/")
     def read_root() -> dict[str, str]:

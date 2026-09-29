@@ -18,6 +18,9 @@ Hay dos entornos, `dev` y `prod`. La app lee su configuración **solo de variabl
 | `APP_ENV`          | `dev`   | `prod`  | Nombre del entorno                   |
 | `APP_LOG_LEVEL`    | `DEBUG` | `INFO`  | Nivel de logs                        |
 | `APP_DOCS_ENABLED` | `true`  | `false` | Expone `/docs` y `/openapi.json`     |
+| `APP_DB_SERVER`    | vacío   | `dp3-mssql-orders-server.database.windows.net` | Servidor de Azure SQL |
+| `APP_DB_NAME`      | vacío   | `dp3-mssql-orders` | Base de datos                   |
+| `APP_DB_AUTHENTICATION` | `ActiveDirectoryDefault` | `ActiveDirectoryMSI` | Autenticación con Entra (sin contraseña) |
 | `APP_AUTH_*`       |         |         | Tenants de Entra en los que confía la API (ver abajo) |
 
 Las plantillas `.env.dev.example` y `.env.prod.example` se suben a git. Las copias reales
@@ -27,6 +30,20 @@ Las plantillas `.env.dev.example` y `.env.prod.example` se suben a git. Las copi
 cp .env.dev.example .env.dev
 cp .env.prod.example .env.prod
 ```
+
+### Base de datos (Azure SQL)
+
+La app se conecta sin contraseña: en Azure con la **managed identity** de la Web App
+(`ActiveDirectoryMSI`) y en local con tu sesión de `az login` (`ActiveDirectoryDefault`).
+Al arrancar prueba la conexión (`SELECT 1`) y deja el resultado en los logs:
+
+```
+INFO:app.database:Database connection OK (mssql+mssqlpython://...)
+ERROR:app.database:Database connection FAILED (...)      # + el error completo del driver
+WARNING:app.database:Database not configured (...)        # sin APP_DB_SERVER / APP_DB_NAME
+```
+
+Si falla, la app **no se detiene**: los endpoints todavía no usan la base de datos.
 
 ### Autenticación (Entra ID / Entra External ID)
 
