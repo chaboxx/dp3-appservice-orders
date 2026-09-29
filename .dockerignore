@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.idea/
+.git/
+tests/
+
+# Las variables se inyectan al ejecutar el contenedor, nunca dentro de la imagen
+.env
+.env.*
