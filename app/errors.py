@@ -18,6 +18,19 @@ from starlette.exceptions import HTTPException
 logger = logging.getLogger(__name__)
 
 
+class DomainError(Exception):
+    """Base de los errores de negocio de cada módulo (p. ej. `OrderNotFound`).
+
+    Los services la lanzan sin saber de HTTP; cada subclase define su `status_code`.
+    """
+
+    status_code: int = 400
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
 def problem(
     request: Request,
     status: int,
@@ -52,6 +65,11 @@ async def validation_exception_handler(
     return problem(request, 422, "Request validation failed", errors=jsonable_encoder(exc.errors()))
 
 
+async def domain_exception_handler(request: Request, exc: DomainError) -> JSONResponse:
+    """Errores controlados: reglas de negocio que lanzan los services."""
+    return problem(request, exc.status_code, exc.detail)
+
+
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Errores no controlados: se registran completos en logs, pero al cliente no se le
     devuelve ningún detalle interno."""
@@ -62,4 +80,5 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(DomainError, domain_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

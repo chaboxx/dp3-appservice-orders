@@ -13,11 +13,21 @@ dependencies = [
 dev = [
     "httpx2>=2.13.1",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.9",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Cada `uv run pytest` mide la cobertura de app/ y muestra las líneas sin probar
+addopts = "--cov --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+# Falla si la cobertura baja de este porcentaje
+fail_under = 90
 
 [tool.ruff]
 line-length = 100

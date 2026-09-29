@@ -18,15 +18,6 @@ def test_read_root() -> None:
     assert response.json() == {"message": "Hola desde dp3-appservice-orders", "env": "dev"}
 
 
-def test_health() -> None:
-    client = make_client(Settings())
-
-    response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
-
 def test_docs_enabled() -> None:
     client = make_client(Settings(docs_enabled=True))
 

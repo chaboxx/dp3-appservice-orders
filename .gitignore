@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 .idea/workspace.xml
 
 # Variables de entorno: solo se suben las plantillas .example
