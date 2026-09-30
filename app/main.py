@@ -14,6 +14,7 @@ from app.errors import register_exception_handlers
 from app.health.router import router as health_router
 from app.orders.repository import InMemoryOrderRepository
 from app.orders.router import router as orders_router
+from app.users.router import router as users_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -46,7 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="dp3-appservice-orders",
-        version="0.2.1",
+        version="0.3.0",
         lifespan=lifespan,
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url="/redoc" if settings.docs_enabled else None,
@@ -65,6 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(orders_router, prefix="/api/v1")
+    app.include_router(users_router, prefix="/api/v1")
 
     return app
 

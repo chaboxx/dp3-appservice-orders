@@ -113,6 +113,7 @@ En App Service configura `WEBSITES_PORT` con el mismo valor que `PORT` (`80` en 
 | POST   | `/api/v1/orders`          | Crea una orden       |
 | GET    | `/api/v1/orders`          | Lista las órdenes    |
 | GET    | `/api/v1/orders/{id}`     | Obtiene una orden    |
+| GET    | `/api/v1/me`              | Usuario autenticado (requiere token de Entra External ID) |
 
 Por ahora las órdenes se guardan **en memoria** (se pierden al reiniciar).
 
@@ -144,7 +145,10 @@ app/
     dependencies.py    # inyección: service, validar que la orden exista (404)
     exceptions.py      # errores de negocio (OrderNotFound → 404)
     constants.py       # OrderStatus
-  users/models.py      # tabla ORM Users (vinculada a Entra por tenant id + object id)
+  users/
+    router.py          # GET /me: el usuario del token (protegido con CurrentPrincipal)
+    schemas.py         # MeRead
+    models.py          # tabla ORM Users (vinculada a Entra por tenant id + object id)
 tests/                 # sigue la misma estructura que app/
   conftest.py          # fixture `client` con una app nueva por test
   test_database.py     # los modelos ORM siguen alineados con el DDL

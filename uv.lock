@@ -390,7 +390,7 @@ wheels = [
 
 [[package]]
 name = "dp3-appservice-orders"
-version = "0.2.1"
+version = "0.3.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
