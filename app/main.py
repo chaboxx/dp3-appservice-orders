@@ -1,4 +1,6 @@
 import logging
+import sys
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -18,23 +20,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     Aquí no va lógica de negocio: cada dominio vive en su paquete (app/orders, app/health...).
     """
     settings = settings or get_settings()
+    # Logs a stdout: es lo que muestra el log stream de App Service (stderr no aparece ahí).
     # Librerías en INFO; APP_LOG_LEVEL solo controla los logs de nuestro código (app.*)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     logging.getLogger("app").setLevel(settings.log_level)
+    # El driver de SQL registra cada pedido de token de la managed identity: solo avisos
+    logging.getLogger("azure").setLevel(logging.WARNING)
 
     engine = build_engine(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        # Al arrancar: el resultado de la conexión a la base queda en los logs
-        check_database(engine)
+        # La prueba de conexión corre en segundo plano y su resultado queda en los logs.
+        # No puede bloquear el arranque: si la red a la base no responde, el driver espera
+        # su timeout y App Service mataría el contenedor por no abrir el puerto a tiempo.
+        app.state.db_check = threading.Thread(
+            target=check_database, args=(engine,), name="db-check", daemon=True
+        )
+        app.state.db_check.start()
         yield
         if engine is not None:
             engine.dispose()
 
     app = FastAPI(
         title="dp3-appservice-orders",
-        version="0.2.0",
+        version="0.2.1",
         lifespan=lifespan,
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url="/redoc" if settings.docs_enabled else None,

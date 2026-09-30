@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -44,7 +46,19 @@ def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_starts_without_database(caplog: pytest.LogCaptureFixture) -> None:
     # `with` ejecuta el arranque (lifespan), que es donde se prueba la conexión
-    with TestClient(create_app(Settings())) as client:
+    app = create_app(Settings())
+    with TestClient(app) as client:
         assert client.get("/health").status_code == 200
+        app.state.db_check.join(timeout=5)  # la prueba corre en segundo plano
 
     assert "Database not configured" in caplog.text
+
+
+def test_slow_database_does_not_delay_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Una base que no responde no puede retrasar el arranque: App Service mataría el contenedor
+    monkeypatch.setattr("app.main.check_database", lambda engine: time.sleep(3))
+    started = time.monotonic()
+
+    with TestClient(create_app(Settings())) as client:
+        assert client.get("/health").status_code == 200
+        assert time.monotonic() - started < 1

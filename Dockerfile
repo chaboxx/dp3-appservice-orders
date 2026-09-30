@@ -24,7 +24,9 @@ USER appuser
 # Por defecto prod (80); dev lo cambia a 8080 con su archivo de variables.
 ENV PORT=80 \
     APP_ENV=prod \
-    APP_DOCS_ENABLED=false
+    APP_DOCS_ENABLED=false \
+    # Sin buffer: cada línea de log sale al instante (si no, Python las acumula en stdout)
+    PYTHONUNBUFFERED=1
 EXPOSE 80 8080
 
 CMD ["/app/.venv/bin/fastapi", "run", "app/main.py"]
