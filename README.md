@@ -21,7 +21,7 @@ Hay dos entornos, `dev` y `prod`. La app lee su configuración **solo de variabl
 | `APP_DB_SERVER`    | vacío   | `dp3-mssql-orders-server.database.windows.net` | Servidor de Azure SQL |
 | `APP_DB_NAME`      | vacío   | `dp3-mssql-orders` | Base de datos                   |
 | `APP_DB_AUTHENTICATION` | `ActiveDirectoryDefault` | `ActiveDirectoryMSI` | Autenticación con Entra (sin contraseña) |
-| `APP_AUTH_*`       |         |         | Tenants de Entra en los que confía la API (ver abajo) |
+| `APP_AUTH_*`       |         |         | Tenant de Entra External ID en el que confía la API (ver abajo) |
 
 Las plantillas `.env.dev.example` y `.env.prod.example` se suben a git. Las copias reales
 (`.env.dev`, `.env.prod`) no, porque ahí podrían terminar secretos:
@@ -47,17 +47,16 @@ Si falla, la app **no se detiene**: los endpoints todavía no usan la base de da
 
 ### Autenticación (Entra ID / Entra External ID)
 
-La API valida access tokens (JWT) de dos tenants: **clientes** (tenant externo, Entra External ID)
-y **staff** (tenant workforce). Cada uno se configura con 3 variables, ninguna es secreta:
+La API es pública y valida access tokens (JWT) de **Entra External ID** (el tenant externo de
+clientes). Se configura con 3 variables, ninguna es secreta:
 
 | Variable                          | De dónde sale                                                  |
 |-----------------------------------|----------------------------------------------------------------|
-| `APP_AUTH_CUSTOMERS_ISSUER`       | campo `issuer` del `.well-known/openid-configuration` del tenant |
-| `APP_AUTH_CUSTOMERS_JWKS_URI`     | campo `jwks_uri` del mismo documento                           |
-| `APP_AUTH_CUSTOMERS_AUDIENCE`     | client ID de la app registration de la API                     |
-| `APP_AUTH_STAFF_*`                | lo mismo, para el tenant workforce                             |
+| `APP_AUTH_ISSUER`                 | campo `issuer` del `.well-known/openid-configuration` del tenant |
+| `APP_AUTH_JWKS_URI`               | campo `jwks_uri` del mismo documento                           |
+| `APP_AUTH_AUDIENCE`               | client ID de la app registration de la API                     |
 
-Sin ninguna configurada, la API arranca pero rechaza todos los tokens (401).
+Sin configurar, la API arranca pero rechaza todos los tokens (401). Si faltan algunas, no arranca.
 
 En Azure no se usan archivos: las variables se configuran como **App Settings** de la Web App
 (y los secretos como referencias a Key Vault).
@@ -129,10 +128,10 @@ app/
   errors.py            # Problem Details (RFC 9457) + DomainError, base de los errores de negocio
   database.py          # Base de SQLAlchemy + created_at/updated_at comunes
   auth/                # ¿el token es válido? ¿quién es según Entra? (no usa la base de datos)
-    config.py          # tenants de confianza (APP_AUTH_*)
+    config.py          # tenant de Entra External ID (APP_AUTH_*)
     validator.py       # TokenValidator: firma (JWKS), iss, aud, exp, tid/oid
-    dependencies.py    # CurrentPrincipal, require_scope(...), require_role(...)
-    schemas.py         # Principal: kind (customer/staff), tenant_id, object_id, scopes, roles
+    dependencies.py    # CurrentPrincipal, require_scope(...)
+    schemas.py         # Principal: tenant_id, object_id, email, name, scopes
     exceptions.py      # 401 (WWW-Authenticate: Bearer) y 403
   health/
     router.py          # GET /health

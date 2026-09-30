@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.auth.config import AuthSettings
+from app.auth.validator import build_token_validator
 from app.config import Settings, get_settings
 from app.database import build_engine, check_database
 from app.errors import register_exception_handlers
@@ -55,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Dependencias compartidas por request (ver app/orders/dependencies.py)
     app.state.order_repository = InMemoryOrderRepository()
     app.state.db_engine = engine
+    app.state.token_validator = build_token_validator(AuthSettings())
 
     @app.get("/")
     def read_root() -> dict[str, str]:

@@ -44,8 +44,13 @@ def test_no_engine_without_database_config() -> None:
 def test_check_database_logs_success_and_failure(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger="app.database")
 
-    assert check_database(create_engine("sqlite://")) is True
-    assert check_database(create_engine("sqlite:///carpeta-que-no-existe/x.db")) is False
+    ok_engine = create_engine("sqlite://")
+    failing_engine = create_engine("sqlite:///carpeta-que-no-existe/x.db")
+
+    assert check_database(ok_engine) is True
+    assert check_database(failing_engine) is False
+    ok_engine.dispose()
+    failing_engine.dispose()
 
     assert "Database connection OK" in caplog.text
     assert "Database connection FAILED" in caplog.text
