@@ -1,13 +1,23 @@
 {
   "info": {
     "name": "dp3-appservice-orders",
-    "description": "Pruebas de la API de órdenes desplegada en Azure App Service.\n\nAntes de usarla, cambia la variable `baseUrl` (pestaña Variables de la colección) por la URL de tu Web App.\n\nEjecuta las requests en orden: \"Crear orden\" guarda el `orderId` que usa \"Obtener orden\".",
+    "description": "Pruebas de la API de órdenes desplegada en Azure App Service.\n\nAntes de usarla, en la pestaña Variables de la colección:\n- `baseUrl`: la URL de tu Web App.\n- `accessToken`: un access token de Entra External ID con el scope `Orders.ReadWrite` (por ahora se obtiene con Bruno; ver AGENTS.md).\n- `productId`: el id de un producto de la tabla Products (ver migrations/03-seed-products.sql).\n\nEjecuta las requests de Orders en orden: \"Crear orden\" guarda el `orderId` que usan las siguientes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "https://<nombre-webapp>.azurewebsites.net",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "productId",
+      "value": "",
       "type": "string"
     },
     {
@@ -38,7 +48,10 @@
           ],
           "request": {
             "method": "GET",
-            "url": "{{baseUrl}}/health"
+            "url": "{{baseUrl}}/health",
+            "auth": {
+              "type": "noauth"
+            }
           }
         },
         {
@@ -59,7 +72,10 @@
           ],
           "request": {
             "method": "GET",
-            "url": "{{baseUrl}}/"
+            "url": "{{baseUrl}}/",
+            "auth": {
+              "type": "noauth"
+            }
           }
         }
       ]
@@ -75,12 +91,14 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Responde 201 y la orden queda pending', () => {",
+                  "pm.test('Responde 201, pending y con el total calculado', () => {",
                   "    pm.response.to.have.status(201);",
-                  "    pm.expect(pm.response.json().status).to.eql('pending');",
+                  "    const order = pm.response.json();",
+                  "    pm.expect(order.status).to.eql('pending');",
+                  "    pm.expect(order.items).to.have.lengthOf(1);",
                   "});",
                   "",
-                  "// Guarda el id para usarlo en \"Obtener orden\"",
+                  "// Guarda el id para las siguientes requests",
                   "pm.collectionVariables.set('orderId', pm.response.json().id);"
                 ]
               }
@@ -88,6 +106,7 @@
           ],
           "request": {
             "method": "POST",
+            "url": "{{baseUrl}}/api/v1/orders",
             "header": [
               {
                 "key": "Content-Type",
@@ -96,22 +115,23 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"user_id\": \"11111111-1111-1111-1111-111111111111\",\n  \"total\": \"10.50\"\n}"
-            },
-            "url": "{{baseUrl}}/api/v1/orders"
+              "raw": "{\n  \"payment_type\": \"card\",\n  \"items\": [\n    {\n      \"product_id\": \"{{productId}}\",\n      \"quantity\": 1\n    }\n  ]\n}"
+            }
           }
         },
         {
-          "name": "Listar órdenes",
+          "name": "Listar órdenes (paginado)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Responde 200 con una lista', () => {",
+                  "pm.test('Responde 200 con una página', () => {",
                   "    pm.response.to.have.status(200);",
-                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "    const page = pm.response.json();",
+                  "    pm.expect(page.items).to.be.an('array');",
+                  "    pm.expect(page).to.include.keys('page', 'page_size', 'total');",
                   "});"
                 ]
               }
@@ -119,32 +139,93 @@
           ],
           "request": {
             "method": "GET",
-            "url": "{{baseUrl}}/api/v1/orders"
+            "url": "{{baseUrl}}/api/v1/orders?page=1&page_size=20"
           }
         },
         {
-          "name": "Obtener orden",
+          "name": "Cambiar tipo de pago",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Responde 200 con la orden creada', () => {",
+                  "pm.test('Responde 200 con el nuevo payment_type', () => {",
                   "    pm.response.to.have.status(200);",
-                  "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('orderId'));",
+                  "    pm.expect(pm.response.json().payment_type).to.eql('cash');",
                   "});"
                 ]
               }
             }
           ],
           "request": {
-            "method": "GET",
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_type\": \"cash\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Cancelar orden",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y la orden queda cancelled', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().status).to.eql('cancelled');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"cancelled\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Borrar orden (soft delete)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 204', () => {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
             "url": "{{baseUrl}}/api/v1/orders/{{orderId}}"
           }
         },
         {
-          "name": "Obtener orden inexistente (404)",
+          "name": "Orden borrada (404)",
           "event": [
             {
               "listen": "test",
@@ -160,8 +241,18 @@
             }
           ],
           "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/api/v1/orders/00000000-0000-0000-0000-000000000000"
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_type\": \"card\"\n}"
+            }
           }
         },
         {
@@ -182,6 +273,7 @@
           ],
           "request": {
             "method": "POST",
+            "url": "{{baseUrl}}/api/v1/orders",
             "header": [
               {
                 "key": "Content-Type",
@@ -190,12 +282,44 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"user_id\": \"11111111-1111-1111-1111-111111111111\",\n  \"total\": \"-5\"\n}"
-            },
-            "url": "{{baseUrl}}/api/v1/orders"
+              "raw": "{\n  \"items\": []\n}"
+            }
+          }
+        },
+        {
+          "name": "Sin token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/orders",
+            "auth": {
+              "type": "noauth"
+            }
           }
         }
       ]
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  }
 }
