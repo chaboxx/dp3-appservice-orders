@@ -1,5 +1,6 @@
 """Tablas Products, Orders y OrderItem (reflejan el DDL de SQL Server)."""
 
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -15,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base, TimestampMixin
+from app.database import Base, DateTime2, TimestampMixin
 
 
 class Product(TimestampMixin, Base):
@@ -47,6 +48,7 @@ class Order(TimestampMixin, Base):
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     payment_type: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[str | None] = mapped_column(String(100))  # valores de OrderStatus
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime2)  # soft delete: NULL = activa
 
     items: Mapped[list[OrderItem]] = relationship(back_populates="order")
 

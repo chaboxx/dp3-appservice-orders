@@ -4,8 +4,9 @@ from pydantic import BaseModel
 
 
 class MeRead(BaseModel):
-    """El usuario autenticado, tal como lo describe su token de Entra External ID."""
+    """El usuario autenticado: su id en la base y los datos de su token de Entra External ID."""
 
+    id: UUID  # Users.id: el dueño de las órdenes
     object_id: UUID  # claim oid: id estable del usuario en el tenant
     tenant_id: UUID  # claim tid
     email: str | None

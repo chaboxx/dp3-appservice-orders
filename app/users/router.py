@@ -3,16 +3,20 @@
 from fastapi import APIRouter
 
 from app.auth.dependencies import CurrentPrincipal
+from app.users.dependencies import CurrentUser
 from app.users.schemas import MeRead
 
 router = APIRouter(tags=["users"])
 
 
 @router.get("/me")
-def read_me(principal: CurrentPrincipal) -> MeRead:
-    """Datos del usuario autenticado. Requiere un token válido; hoy salen solo del token
-    (todavía no se lee la tabla Users)."""
+def read_me(principal: CurrentPrincipal, user: CurrentUser) -> MeRead:
+    """Datos del usuario autenticado. Requiere un token válido (no exige scope).
+
+    Es lo primero que llama un cliente después del login: si el usuario todavía no existe en
+    la tabla Users, se crea aquí."""
     return MeRead(
+        id=user.id,
         object_id=principal.object_id,
         tenant_id=principal.tenant_id,
         email=principal.email,

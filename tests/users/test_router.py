@@ -24,6 +24,7 @@ def test_me_returns_the_user_from_the_token(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
+        "id": response.json()["id"],
         "object_id": USER_OID,
         "tenant_id": TENANT_ID,
         "email": "ana@example.com",
@@ -33,6 +34,23 @@ def test_me_returns_the_user_from_the_token(client: TestClient) -> None:
         "city": "Lima",
         "scopes": ["Orders.ReadWrite"],
     }
+
+
+def test_me_creates_the_user_once(client: TestClient) -> None:
+    headers = {"Authorization": f"Bearer {make_token()}"}
+
+    first = client.get(URL, headers=headers).json()["id"]
+    second = client.get(URL, headers=headers).json()["id"]
+
+    assert first == second
+    assert len(client.app.state.user_repository._users) == 1
+
+
+def test_me_requires_the_email_claim(client: TestClient) -> None:
+    response = client.get(URL, headers={"Authorization": f"Bearer {make_token(email=None)}"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "The access token must include the email claim"
 
 
 def test_me_requires_a_token(client: TestClient) -> None:

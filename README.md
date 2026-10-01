@@ -43,7 +43,18 @@ ERROR:app.database:Database connection FAILED (...)      # + el error completo d
 WARNING:app.database:Database not configured (...)        # sin APP_DB_SERVER / APP_DB_NAME
 ```
 
-Si falla, la app **no se detiene**: los endpoints todavía no usan la base de datos.
+Si falla, la app **no se detiene**, pero los endpoints que usan la base responderán 500.
+Sin `APP_DB_SERVER` / `APP_DB_NAME` la app usa repositorios **en memoria** (se pierden al
+reiniciar y no hay productos), pensados para los tests.
+
+Las migraciones están en `migrations/` y se ejecutan a mano, en orden (p. ej. desde el Query
+Editor del portal):
+
+| Archivo | Qué hace |
+|---|---|
+| `01-dp3ddl.sql` | Esquema: `Users`, `Products`, `Orders`, `OrderItem` |
+| `02-orders-soft-delete.sql` | Agrega `Orders.deleted_at` (soft delete). **Requerida** por esta versión |
+| `03-seed-products.sql` | Productos de prueba (opcional) |
 
 ### Autenticación (Entra ID / Entra External ID)
 
@@ -110,12 +121,20 @@ En App Service configura `WEBSITES_PORT` con el mismo valor que `PORT` (`80` en 
 | Método | Ruta                      | Descripción          |
 |--------|---------------------------|----------------------|
 | GET    | `/health`                 | Health check         |
-| POST   | `/api/v1/orders`          | Crea una orden       |
-| GET    | `/api/v1/orders`          | Lista las órdenes    |
-| GET    | `/api/v1/orders/{id}`     | Obtiene una orden    |
-| GET    | `/api/v1/me`              | Usuario autenticado (requiere token de Entra External ID) |
+| POST   | `/api/v1/orders`          | Crea una orden con sus ítems |
+| GET    | `/api/v1/orders?page=1&page_size=20` | Lista tus órdenes, la más nueva primero |
+| PATCH  | `/api/v1/orders/{id}`     | Cambia `payment_type` o cancela (`"status": "cancelled"`) |
+| DELETE | `/api/v1/orders/{id}`     | Borra la orden (soft delete) |
+| GET    | `/api/v1/me`              | Usuario autenticado; lo da de alta en la base si es nuevo |
 
-Por ahora las órdenes se guardan **en memoria** (se pierden al reiniciar).
+Los endpoints de órdenes exigen un token de Entra External ID con el scope `Orders.ReadWrite` y
+solo ven las órdenes del usuario del token. Ejemplo de creación (precios y total los calcula
+el server a partir de `Products`):
+
+```json
+POST /api/v1/orders
+{ "payment_type": "card", "items": [{ "product_id": "<id>", "quantity": 2 }] }
+```
 
 ## Estructura
 
@@ -127,7 +146,7 @@ app/
   main.py              # create_app(): arma la app (handlers, routers). Sin lógica de negocio
   config.py            # configuración global (variables de entorno)
   errors.py            # Problem Details (RFC 9457) + DomainError, base de los errores de negocio
-  database.py          # Base de SQLAlchemy + created_at/updated_at comunes
+  database.py          # Base de SQLAlchemy, created_at/updated_at, transacción por request
   auth/                # ¿el token es válido? ¿quién es según Entra? (no usa la base de datos)
     config.py          # tenant de Entra External ID (APP_AUTH_*)
     validator.py       # TokenValidator: firma (JWKS), iss, aud, exp, tid/oid
@@ -138,15 +157,18 @@ app/
     router.py          # GET /health
   orders/
     router.py          # endpoints HTTP: traducen HTTP ↔ service
-    schemas.py         # contrato de la API (Pydantic): OrderCreate, OrderRead
-    service.py         # reglas de negocio; no importa FastAPI
-    repository.py      # acceso a datos: Protocol + implementación en memoria
+    schemas.py         # contrato de la API (Pydantic): OrderCreate, OrderUpdate, OrderRead, OrderPage
+    service.py         # reglas de negocio (stock, estados, soft delete); no importa FastAPI
+    repository.py      # acceso a datos: Protocols + implementaciones en memoria y SQL
     models.py          # tablas ORM Products, Orders y OrderItem (reflejan el DDL)
-    dependencies.py    # inyección: service, validar que la orden exista (404)
-    exceptions.py      # errores de negocio (OrderNotFound → 404)
-    constants.py       # OrderStatus
+    dependencies.py    # inyección: service, cargar la orden del usuario (404 si no es suya)
+    exceptions.py      # errores de negocio (404, 409, 422)
+    constants.py       # OrderStatus, scope y límites
   users/
-    router.py          # GET /me: el usuario del token (protegido con CurrentPrincipal)
+    router.py          # GET /me
+    service.py         # alta automática: crea el usuario del token si no existe
+    repository.py      # Protocol + implementaciones en memoria y SQL
+    dependencies.py    # CurrentUser
     schemas.py         # MeRead
     models.py          # tabla ORM Users (vinculada a Entra por tenant id + object id)
 tests/                 # sigue la misma estructura que app/
@@ -155,6 +177,8 @@ tests/                 # sigue la misma estructura que app/
   auth/                # tokens firmados con una clave RSA local: sin Entra ni red
   health/
   orders/              # test_router.py (HTTP) y test_service.py (unitarios, sin HTTP)
+  users/               # igual que orders/
+migrations/            # scripts SQL, se ejecutan a mano y en orden
 .env.*.example         # plantillas de variables por entorno
 pyproject.toml         # dependencias y configuración de herramientas
 uv.lock                # versiones exactas (se commitea)

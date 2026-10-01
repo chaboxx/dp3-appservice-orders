@@ -9,11 +9,12 @@ from fastapi import FastAPI
 from app.auth.config import AuthSettings
 from app.auth.validator import build_token_validator
 from app.config import Settings, get_settings
-from app.database import build_engine, check_database
+from app.database import build_engine, build_session_factory, check_database
 from app.errors import register_exception_handlers
 from app.health.router import router as health_router
-from app.orders.repository import InMemoryOrderRepository
+from app.orders.repository import InMemoryOrderRepository, InMemoryProductRepository
 from app.orders.router import router as orders_router
+from app.users.repository import InMemoryUserRepository
 from app.users.router import router as users_router
 
 
@@ -47,7 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="dp3-appservice-orders",
-        version="0.4.1",
+        version="0.5.0",
         lifespan=lifespan,
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url="/redoc" if settings.docs_enabled else None,
@@ -55,9 +56,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     register_exception_handlers(app)
 
-    # Dependencias compartidas por request (ver app/orders/dependencies.py)
-    app.state.order_repository = InMemoryOrderRepository()
+    # Dependencias compartidas por request (ver app/*/dependencies.py). Con base configurada
+    # cada request usa repositorios SQL con su propia sesión; sin base (tests), los de memoria.
     app.state.db_engine = engine
+    app.state.session_factory = build_session_factory(engine)
+    app.state.order_repository = InMemoryOrderRepository()
+    app.state.product_repository = InMemoryProductRepository()
+    app.state.user_repository = InMemoryUserRepository()
     app.state.token_validator = build_token_validator(AuthSettings())
 
     @app.get("/")

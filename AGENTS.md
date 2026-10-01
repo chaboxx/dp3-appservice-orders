@@ -14,7 +14,7 @@ todavía no existe) y se prueba con Bruno/Postman.
 - Autenticación: **solo** access tokens de **Microsoft Entra External ID** (tenant externo de
   clientes). No se aceptan tokens del tenant workforce (staff); esa opción se descartó.
 - Datos: **Azure SQL** (privada, vía private endpoint) con **managed identity**, sin contraseñas.
-  Hoy la app solo verifica la conexión al arrancar; las órdenes todavía viven **en memoria**.
+  Con `APP_DB_*` configuradas se usan repositorios SQL; sin ellas (tests), repositorios en memoria.
 
 ## Stack
 
@@ -39,7 +39,8 @@ transversales. **No crear carpetas o archivos vacíos "por si acaso"**: se agreg
 app/
   main.py          create_app(): arma la app (logging, handlers, lifespan, routers). Sin lógica
   config.py        Settings global (APP_ENV, APP_LOG_LEVEL, APP_DOCS_ENABLED, APP_DB_*)
-  database.py      Base ORM, TimestampMixin, DateTime2, build_engine(), check_database()
+  database.py      Base ORM, TimestampMixin, DateTime2, utcnow(), build_engine(),
+                   build_session_factory(), check_database(), DbSession (transacción por request)
   errors.py        Problem Details (RFC 9457) + DomainError (base de errores de negocio)
   auth/            ¿el token es válido? ¿quién es? (NO usa la base de datos)
     config.py        AuthSettings: APP_AUTH_ISSUER / APP_AUTH_JWKS_URI / APP_AUTH_AUDIENCE
@@ -47,7 +48,7 @@ app/
     dependencies.py  CurrentPrincipal, require_scope("...")
     schemas.py       Principal (tid, oid, email, name, given_name, family_name, city, scopes)
     exceptions.py    NotAuthenticated / InvalidToken (401) y Forbidden (403)
-  users/           router.py (GET /me), schemas.py (MeRead), models.py (tabla Users)
+  users/           alta automática (service), CurrentUser (dependencies), GET /me, tabla Users
   orders/          router, schemas, service, repository, models, dependencies, exceptions, constants
   health/          router.py (GET /health)
 tests/             misma estructura que app/ (tests/auth, tests/orders, tests/users, ...)
@@ -62,8 +63,16 @@ postman/           colección de Postman (sin OAuth todavía; ver "Pendiente")
 - `schemas.py` (Pydantic, contrato público) está separado de `models.py` (ORM).
 - Inyección de dependencias con `Depends` en `dependencies.py` de cada módulo. Los objetos
   compartidos se crean **una vez por app** en `create_app` y se guardan en `app.state`
-  (`order_repository`, `db_engine`, `token_validator`), nunca como globales de módulo: así cada
-  test arranca limpio y se pueden reemplazar.
+  (`db_engine`, `session_factory`, `token_validator` y los repositorios en memoria
+  `order_repository`, `product_repository`, `user_repository`), nunca como globales de módulo:
+  así cada test arranca limpio y se pueden reemplazar.
+- Repositorios: un `Protocol` + versión en memoria + versión SQL. El `get_*` de `dependencies.py`
+  elige: si `DbSession` es `None` (sin base) usa el de memoria de `app.state`; si no, crea el SQL
+  con la sesión del request.
+- **Una transacción por request** (`DbSession`, `Depends(..., scope="function")`): commit al
+  terminar el endpoint y **antes** de enviar la respuesta; rollback ante cualquier excepción,
+  incluidos los `DomainError`. Por eso el service puede lanzar un error a mitad de camino (p. ej.
+  después de descontar stock) sin dejar datos a medias.
 - Rutas versionadas con prefijo `/api/v1` al registrar el router (no con carpetas `v1/`).
 - Un dominio nuevo = carpeta hermana de `orders/` con la misma forma, registrada en `main.py`.
 
@@ -73,12 +82,38 @@ postman/           colección de Postman (sin OAuth todavía; ver "Pendiente")
 |---|---|---|---|
 | GET | `/` | no | `{"message", "env"}` |
 | GET | `/health` | no | Lo usa el probe de App Service; debe seguir público |
-| POST | `/api/v1/orders` | **no (pendiente)** | Hoy recibe `user_id` en el body |
-| GET | `/api/v1/orders` | **no (pendiente)** | Lista **todas** las órdenes |
-| GET | `/api/v1/orders/{id}` | **no (pendiente)** | 404 Problem Details si no existe |
-| GET | `/api/v1/me` | **sí** (token válido) | Datos del usuario desde el token; no exige scope |
+| POST | `/api/v1/orders` | token + `Orders.ReadWrite` | 201. Body `{payment_type?, items: [{product_id, quantity}]}` |
+| GET | `/api/v1/orders?page=&page_size=` | token + `Orders.ReadWrite` | `{items, page, page_size, total}`, más nueva primero |
+| PATCH | `/api/v1/orders/{id}` | token + `Orders.ReadWrite` | `{payment_type?, status?: "cancelled"}` |
+| DELETE | `/api/v1/orders/{id}` | token + `Orders.ReadWrite` | 204, soft delete |
+| GET | `/api/v1/me` | **sí** (token válido) | Usuario de la base (`id`) + datos del token; no exige scope |
 
 `/docs`, `/redoc` y `/openapi.json` solo existen con `APP_DOCS_ENABLED=true` (dev).
+`GET /api/v1/orders/{id}` se quitó a propósito: se agregará cuando se pida.
+
+### Reglas de órdenes
+
+- El dueño es `Users.id` del usuario del token. Una orden de otro usuario o borrada responde
+  **404** (no se revela que existe).
+- **Crear**: rechaza campos fuera del contrato (`user_id`, `status`, `unit_price`, `total` → 422).
+  1–50 ítems sin productos repetidos, `quantity` > 0. `unit_price` sale de `Products.price` y
+  `total = Σ unit_price × quantity` (debe caber en `DECIMAL(12,2)`). Producto inexistente → 422;
+  sin stock → 409. El stock se descuenta con un `UPDATE ... WHERE stock >= q` (atómico).
+- **PATCH**: solo órdenes `pending` (si no, 409). Se puede cambiar `payment_type` y cancelar;
+  cancelar devuelve el stock. `confirmed` queda para un futuro flujo de pago.
+- **DELETE**: llena `deleted_at`. `pending` se cancela primero (devuelve stock); `cancelled` se
+  borra tal cual; `confirmed` → 409.
+- PATCH y DELETE leen la orden con `WITH (UPDLOCK, ROWLOCK)` para que dos requests simultáneos
+  no devuelvan el stock dos veces.
+
+### Alta automática de usuarios (`CurrentUser`)
+
+En cada request autenticado que use `CurrentUser` (órdenes y `/me`): busca `Users` por
+(`tid`, `oid`); si no existe lo crea (`email`, `given_name` → `first_name`, `family_name` →
+`last_name`); si existe, rechaza inactivos (403), sincroniza email/nombres y actualiza
+`last_login_at` como máximo cada 15 minutos. Sin claim `email` → 403 (`Users.email` es NOT NULL).
+Dos primeros requests simultáneos: el segundo choca con `ux_users_entra_identity`, se captura en un
+savepoint y se devuelve el usuario ya creado.
 
 ## Configuración (variables de entorno)
 
@@ -130,6 +165,11 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 - El DDL de SQL Server es la **fuente de verdad**; los modelos ORM lo reflejan (nombres de tablas
   `Users`, `Products`, `Orders`, `OrderItem`, constraints e índices) pero **no crean tablas**.
   `tests/test_database.py` verifica que sigan alineados (incluido `DATETIME2`).
+- Migraciones en `migrations/`, numeradas y aplicadas **a mano por el usuario** (Query Editor):
+  `01-dp3ddl.sql` (esquema), `02-orders-soft-delete.sql` (`Orders.deleted_at`),
+  `03-seed-products.sql` (productos de prueba, opcional). Un cambio de esquema = un archivo nuevo,
+  no editar los ya aplicados.
+- Fechas: `utcnow()` (UTC **sin** zona horaria, como `DATETIME2`); no mezclar con fechas aware.
 - `Product`, `Order` y `OrderItem` viven en `app/orders/models.py`; `User` en `app/users/models.py`.
 - IDs con `NEWSEQUENTIALID()` y timestamps con `SYSUTCDATETIME()` los genera la base; el
   repositorio en memoria los simula.
@@ -165,6 +205,10 @@ configuración **incompleta** no arranca (falla rápido a propósito).
    `bash -c echo>/dev/tcp/IP/PUERTO`) o el *Network troubleshooter* del portal.
 6. En Git Bash, rutas que empiezan con `/` se reescriben (`C:/Program Files/Git/...`): usar
    `MSYS_NO_PATHCONV=1` con `docker run ... /app/...` o `az --ids /subscriptions/...`.
+7. **`with_for_update()` no hace nada en SQL Server** (SQLAlchemy lo ignora en el dialecto
+   mssql). Para bloquear filas usar `.with_hint(Model, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")`.
+8. En Windows el reloj puede devolver el mismo valor en llamadas seguidas: en tests que dependen
+   del orden por `created_at`, asignar fechas explícitas.
 
 ## Tests
 
@@ -174,7 +218,10 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 - Auth sin Entra ni red: `tests/auth/tokens.py` firma tokens con una clave RSA local
   (`make_token(**claims)`, `make_validator()`); en tests HTTP se asigna
   `app.state.token_validator = make_validator()`.
-- Cada test usa una app nueva (`create_app(Settings())`) para no compartir estado.
+- Cada test usa una app nueva (`create_app(Settings())`) para no compartir estado. Los productos
+  se cargan con `app.state.product_repository.add(Product(...))`.
+- Los repositorios SQL **no tienen tests automáticos** todavía (la cobertura queda >90% sin
+  ellos). Siguiente paso posible: tests de integración contra SQL Server en Docker.
 
 ## Build, versión y despliegue
 
@@ -190,10 +237,10 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 
 ## Pendiente (siguiente trabajo)
 
-- Proteger `orders` con `require_scope("Orders.ReadWrite")`, sacar `user_id` del token (hoy viene
-  en el body) y filtrar por dueño (orden ajena → 404). Decidir: `user_id` = `oid` (simple) o
-  `Users.id` con alta automática en el primer request (upsert por `tid`+`oid`).
-- Repositorios SQL reales (`SqlOrderRepository`, usuarios) en lugar de los de memoria.
+- Aplicar `migrations/02-orders-soft-delete.sql` (y opcionalmente `03-seed-products.sql`) en
+  Azure SQL **antes** de desplegar esta versión: el ORM ya consulta `Orders.deleted_at`.
+- `GET /api/v1/orders/{id}`; CRUD de productos; flujo de pago que pase órdenes a `confirmed`.
+- Tests de integración de los repositorios SQL (SQL Server en Docker).
 - CORS para `dp3-web-store` (solo su origen) cuando exista la SPA.
 - Agregar OAuth 2.0 a la colección de Postman (Bruno es el cliente de pruebas actual).
 - Seguridad: deshabilitar acceso público de SQL (`--enable-public-network false`) cuando ya no se
