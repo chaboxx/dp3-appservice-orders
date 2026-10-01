@@ -21,7 +21,8 @@ class User(TimestampMixin, Base):
     entra_tenant_id: Mapped[UUID]  # claim tid
     entra_object_id: Mapped[UUID]  # claim oid
     email: Mapped[str] = mapped_column(Unicode(320))
-    first_name: Mapped[str | None] = mapped_column(Unicode(200))
-    last_name: Mapped[str | None] = mapped_column(Unicode(200))
+    # Cifrados con Always Encrypted (migrations/05). El driver los cifra y descifra: aquí son str
+    first_name: Mapped[str | None] = mapped_column(Unicode(200, collation="Latin1_General_BIN2"))
+    last_name: Mapped[str | None] = mapped_column(Unicode(200, collation="Latin1_General_BIN2"))
     is_active: Mapped[bool] = mapped_column(server_default=text("1"))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime2)

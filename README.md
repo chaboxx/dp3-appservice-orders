@@ -60,6 +60,7 @@ Editor del portal):
 | `02-orders-soft-delete.sql` | Agrega `Orders.deleted_at` (soft delete) |
 | `03-seed-products.sql` | Productos de prueba (opcional) |
 | `04-always-encrypted-keys.sql` | Llaves de Always Encrypted (CMK, CEK) y permisos de la app. Ya aplicada; la CEK se crea con SSMS, no a mano |
+| `05-users-names-encrypted.sql` | Cifra `Users.first_name` y `Users.last_name` (columnas recreadas vacías; la app las vuelve a llenar desde el token) |
 
 ### Autenticación (Entra ID / Entra External ID)
 

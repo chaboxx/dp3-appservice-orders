@@ -26,6 +26,15 @@ def test_timestamps_are_datetime2_in_sql_server() -> None:
     assert "created_at DATETIME2 NOT NULL" in ddl
 
 
+def test_encrypted_names_use_bin2_collation() -> None:
+    # Always Encrypted exige collation _BIN2 en las columnas de texto cifradas (migrations/05)
+    ddl = str(CreateTable(Base.metadata.tables["Users"]).compile(dialect=mssql.dialect()))
+
+    assert "first_name NVARCHAR(200) COLLATE Latin1_General_BIN2 NULL" in ddl
+    assert "last_name NVARCHAR(200) COLLATE Latin1_General_BIN2 NULL" in ddl
+    assert "email NVARCHAR(320) NOT NULL" in ddl  # el email queda legible y con su collation
+
+
 def test_engine_uses_managed_identity_and_always_encrypted() -> None:
     settings = Settings(db_server="dp3-sql.database.windows.net", db_name="orders")
 

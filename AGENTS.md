@@ -168,8 +168,8 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 - Migraciones en `migrations/`, numeradas y aplicadas **a mano por el usuario** (Query Editor):
   `01-dp3ddl.sql` (esquema), `02-orders-soft-delete.sql` (`Orders.deleted_at`),
   `03-seed-products.sql` (productos de prueba, opcional), `04-always-encrypted-keys.sql` (CMK,
-  CEK y permisos; ya aplicada, documenta el estado). Un cambio de esquema = un archivo nuevo, no
-  editar los ya aplicados.
+  CEK y permisos) y `05-users-names-encrypted.sql` (cifra los nombres). Todas aplicadas. Un cambio
+  de esquema = un archivo nuevo, no editar los ya aplicados.
 - Fechas: `utcnow()` (UTC **sin** zona horaria, como `DATETIME2`); no mezclar con fechas aware.
 - `Product`, `Order` y `OrderItem` viven en `app/orders/models.py`; `User` en `app/users/models.py`.
 - IDs con `NEWSEQUENTIALID()` y timestamps con `SYSUTCDATETIME()` los genera la base; el
@@ -186,10 +186,16 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 - Objetivo: que quien consulte la base sin acceso a la llave (Query Editor, admins de SQL) vea los
   nombres como binario. `Users.email` queda **legible** a propósito (se consulta en SQL).
 - Cifrado **aleatorizado**, sin enclaves: sobre esas columnas no hay `WHERE`, `ORDER BY`, `LIKE`,
-  índices ni estadísticas. La app no los necesita (busca por `tid` + `oid`).
-- Llaves: CMK `CMK_Orders` → RSA 3072 `orders-pii-kek` en `dp3-kv-crypto` (Standard, RBAC);
-  CEK `CEK_UsersNames` (AES-256, guardada cifrada en la base). La identity de la Web App tiene
-  *Key Vault Crypto User* sobre esa llave y `VIEW ANY COLUMN … DEFINITION` en la base.
+  índices ni estadísticas. La app no los necesita (busca por `tid` + `oid`). Collation
+  `Latin1_General_BIN2` solo en esas dos columnas (Always Encrypted la exige; el modelo la refleja).
+- Llaves: CMK `CMK_Orders` → RSA 3072 `orders-pii-kek` en `dp3-kv-crypto` (Standard, RBAC; la
+  llave permite `wrapKey/unwrapKey/encrypt/decrypt/sign/verify`); CEK `CEK_UsersNames` (AES-256,
+  guardada cifrada en la base). La identity de la Web App tiene *Key Vault Crypto User* sobre el
+  vault y `VIEW ANY COLUMN … DEFINITION` en la base. Sin enclaves (`allow_enclave_computations = 0`),
+  aunque la base tiene el enclave VBS habilitado.
+- Cómo se cifró: las dos columnas se **recrearon vacías y cifradas** (migrations/05) en vez de
+  cifrar los datos con SSMS, porque los nombres salen del token de Entra: `_sync_profile` los
+  vuelve a escribir (cifrados) en el siguiente request de cada usuario.
 - Todo lo hace el driver (`ColumnEncryption=Enabled`, `KeyStoreAuthentication=KeyVaultManagedIdentity`):
   el código sigue usando `str`. Reglas: valores siempre como **parámetros** (nunca literales en
   SQL) y `hide_parameters=True` en el engine para que los nombres no lleguen a los logs.
@@ -206,7 +212,12 @@ configuración **incompleta** no arranca (falla rápido a propósito).
   `data`), *route all* activo. Private endpoint de SQL en `dp3-vnet-orders/default` (10.0.0.4),
   zona `privatelink.database.windows.net` vinculada a la VNet. Sin NSGs por ahora.
 - Servidor `dp3-mssql-orders-server`, base `dp3-mssql-orders`, política de conexión **Redirect**
-  (configurada explícitamente después de crear el private endpoint).
+  (configurada explícitamente después de crear el private endpoint). Acceso público habilitado
+  solo para la IP del dueño (Query Editor / SSMS).
+- Key Vault `dp3-kv-crypto` (RG `dp3`, Standard, RBAC, firewall `Deny` salvo la IP del dueño):
+  private endpoint `dp3-privateendpoint-kvsecret` en `dp3-vnet-common` (10.4.0.4). La zona
+  `privatelink.vaultcore.azure.net` (RG `dp3`) está vinculada a `dp3-vnet-common` **y** a
+  `dp3-vnet-orders` (`link-dp3-vnet-orders`); las dos VNets tienen peering (`common-orders`).
 - La entrada a la API es pública (front-ends de App Service); se protege con HTTPS + JWT, no con NSG.
 
 ## Lecciones aprendidas (no repetir)
@@ -234,7 +245,12 @@ configuración **incompleta** no arranca (falla rápido a propósito).
    SQLAlchemy agrega `Trusted_Connection=Yes`, que choca con la managed identity.
 10. **La app llega a Key Vault por el private endpoint** (`10.4.0.4`, en `dp3-vnet-common`): la
     zona `privatelink.vaultcore.azure.net` tiene que estar vinculada también a `dp3-vnet-orders`,
-    o la app resuelve la IP pública y el firewall del vault la rechaza.
+    o la app resuelve la IP pública y el firewall del vault la rechaza. Síntoma: `CE258 Error
+    retrieving key information` al escribir o leer nombres. Ojo: la prueba TCP a 443 **pasa igual**
+    contra la IP pública; lo que prueba la ruta correcta es `getent hosts dp3-kv-crypto.vault.azure.net`
+    → `10.4.0.4`.
+11. **mssql-python no soporta Always Encrypted** (1.15.0): su lista de parámetros de conexión
+    permitidos descarta `ColumnEncryption` y `KeyStoreAuthentication` sin dar error.
 
 ## Tests
 
@@ -263,9 +279,10 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 
 ## Pendiente (siguiente trabajo)
 
-- Always Encrypted: desplegar la 0.6.0 con `Users` todavía en claro; luego, con la Web App
-  detenida, cifrar `first_name`/`last_name` con el asistente de SSMS (Randomized, `CEK_UsersNames`),
-  registrar el DDL final en `migrations/05-…` y alinear la collation en `app/users/models.py`.
+- Key Vault `dp3-kv-crypto`: activar la **protección contra purga** (sigue apagada; irreversible,
+  evita perder la llave y con ella los nombres). Opcional: limitar el rol *Crypto User* de la app
+  a la llave `orders-pii-kek` en vez de a todo el vault.
+- Rotar `orders-pii-kek` antes del **2028-10-01** (vence ese día).
 - `GET /api/v1/orders/{id}`; CRUD de productos; flujo de pago que pase órdenes a `confirmed`.
 - Tests de integración de los repositorios SQL (SQL Server en Docker).
 - CORS para `dp3-web-store` (solo su origen) cuando exista la SPA.
