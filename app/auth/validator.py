@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Margen para diferencias de reloj entre Entra y el servidor
 CLOCK_SKEW_SECONDS = 60
 
+# Valor que pone Entra en el claim "name" cuando el usuario no tiene Display Name
+UNKNOWN_NAME = "unknown"
+
 
 class SigningKeys(Protocol):
     """Lo que necesitamos de PyJWKClient; en los tests se reemplaza por claves locales."""
@@ -52,12 +55,21 @@ class TokenValidator:
             tenant_id=UUID(claims["tid"]),
             object_id=UUID(claims["oid"]),
             email=claims.get("email"),
-            name=claims.get("name"),
+            name=_display_name(claims),
             given_name=claims.get("given_name"),
             family_name=claims.get("family_name"),
             city=claims.get("city"),
             scopes=frozenset(claims.get("scp", "").split()),
         )
+
+
+def _display_name(claims: dict) -> str | None:
+    """El claim name; si Entra no lo tiene ("unknown"), se arma con nombres + apellidos."""
+    name = (claims.get("name") or "").strip()
+    if name and name.lower() != UNKNOWN_NAME:
+        return name
+    parts = (claims.get("given_name"), claims.get("family_name"))
+    return " ".join(part for part in parts if part) or None
 
 
 def build_token_validator(settings: AuthSettings) -> TokenValidator | None:

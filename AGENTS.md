@@ -122,7 +122,8 @@ configuración **incompleta** no arranca (falla rápido a propósito).
   `https://<subdominio>.ciamlogin.com/<tenant-id>/oauth2/v2.0/{authorize,token}`.
 - Un **ID token** (p. ej. el de "Run user flow"/quickstart, lleva `nonce` y no `scp`) **no** sirve
   para la API y se rechaza (falta `oid`/`aud` incorrecto). Es el comportamiento correcto.
-- `name` puede venir como `"unknown"` cuando el usuario no tiene Display Name (lo pone Entra).
+- Entra manda `name: "unknown"` cuando el usuario no tiene Display Name; el validador lo
+  reemplaza por `given_name + family_name` (o `null` si tampoco existen).
 
 ## Base de datos (Azure SQL)
 
@@ -184,7 +185,8 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 4. `docker build -t 159123007/dp3-appservice-orders:X.Y.Z -t 159123007/dp3-appservice-orders:latest .`
    desde el commit etiquetado (árbol limpio), prueba de humo del contenedor (`/health`, `/me` → 401),
    y `docker push` de ambos tags.
-5. El usuario despliega reiniciando la Web App (usa `latest`). No hay remoto git configurado.
+5. `git push --follow-tags origin main` (remoto: `git@github.com:chaboxx/dp3-appservice-orders.git`).
+   El usuario despliega reiniciando la Web App (usa `latest`).
 
 ## Pendiente (siguiente trabajo)
 

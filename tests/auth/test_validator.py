@@ -18,6 +18,25 @@ def test_valid_token() -> None:
 
 
 @pytest.mark.parametrize(
+    ("claims", "expected"),
+    [
+        pytest.param({"name": "Ana Pérez"}, "Ana Pérez", id="name-from-entra"),
+        pytest.param(
+            {"name": "unknown", "given_name": "RODRIGO", "family_name": "CUEVA PASTOR"},
+            "RODRIGO CUEVA PASTOR",
+            id="unknown-uses-given-and-family-name",
+        ),
+        pytest.param({"given_name": "Ana"}, "Ana", id="missing-name-uses-given-name"),
+        pytest.param({"name": "unknown"}, None, id="unknown-without-names-is-null"),
+    ],
+)
+def test_display_name(claims: dict[str, str], expected: str | None) -> None:
+    principal = make_validator().validate(make_token(**claims))
+
+    assert principal.name == expected
+
+
+@pytest.mark.parametrize(
     "token",
     [
         pytest.param(make_token(exp=int(time.time()) - 3600), id="expired"),

@@ -9,7 +9,7 @@ class Principal:
     tenant_id: UUID  # claim tid
     object_id: UUID  # claim oid: id estable del usuario dentro del tenant
     email: str | None = None
-    name: str | None = None  # Entra pone "unknown" si el usuario no tiene Display Name
+    name: str | None = None  # si Entra manda "unknown", se arma con given_name + family_name
     given_name: str | None = None
     family_name: str | None = None
     city: str | None = None  # solo si se agrega como claim en Entra (Attributes & Claims)
