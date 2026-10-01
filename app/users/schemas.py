@@ -10,4 +10,7 @@ class MeRead(BaseModel):
     tenant_id: UUID  # claim tid
     email: str | None
     name: str | None
+    given_name: str | None
+    family_name: str | None
+    city: str | None
     scopes: list[str]  # permisos que el usuario le dio a la app cliente (claim scp)

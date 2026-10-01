@@ -17,5 +17,8 @@ def read_me(principal: CurrentPrincipal) -> MeRead:
         tenant_id=principal.tenant_id,
         email=principal.email,
         name=principal.name,
+        given_name=principal.given_name,
+        family_name=principal.family_name,
+        city=principal.city,
         scopes=sorted(principal.scopes),
     )

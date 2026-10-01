@@ -18,7 +18,7 @@ def client() -> TestClient:
 
 
 def test_me_returns_the_user_from_the_token(client: TestClient) -> None:
-    token = make_token(name="Ana Pérez")
+    token = make_token(name="Ana Pérez", given_name="Ana", family_name="Pérez", city="Lima")
 
     response = client.get(URL, headers={"Authorization": f"Bearer {token}"})
 
@@ -28,6 +28,9 @@ def test_me_returns_the_user_from_the_token(client: TestClient) -> None:
         "tenant_id": TENANT_ID,
         "email": "ana@example.com",
         "name": "Ana Pérez",
+        "given_name": "Ana",
+        "family_name": "Pérez",
+        "city": "Lima",
         "scopes": ["Orders.ReadWrite"],
     }
 
@@ -37,3 +40,12 @@ def test_me_requires_a_token(client: TestClient) -> None:
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_me_optional_claims_are_null_when_missing(client: TestClient) -> None:
+    response = client.get(URL, headers={"Authorization": f"Bearer {make_token()}"})
+
+    body = response.json()
+    assert body["given_name"] is None
+    assert body["family_name"] is None
+    assert body["city"] is None

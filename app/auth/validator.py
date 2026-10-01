@@ -53,6 +53,9 @@ class TokenValidator:
             object_id=UUID(claims["oid"]),
             email=claims.get("email"),
             name=claims.get("name"),
+            given_name=claims.get("given_name"),
+            family_name=claims.get("family_name"),
+            city=claims.get("city"),
             scopes=frozenset(claims.get("scp", "").split()),
         )
 
