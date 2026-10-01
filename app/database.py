@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 # DATETIME2 en SQL Server (DateTime genérico sería DATETIME, con precisión de ~3 ms)
 DateTime2 = DateTime().with_variant(DATETIME2(), "mssql")
 
+# Driver del sistema (se instala en el Dockerfile). mssql-python no soporta Always Encrypted.
+ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
+
 
 def utcnow() -> datetime:
     """Hora UTC sin zona horaria, igual que SYSUTCDATETIME() en un DATETIME2."""
@@ -41,20 +44,31 @@ class TimestampMixin:
 
 
 def build_engine(settings: Settings) -> Engine | None:
-    """Engine de Azure SQL con el driver mssql-python. None si no hay base configurada.
+    """Engine de Azure SQL (pyodbc + ODBC Driver 18). None si no hay base configurada.
 
     No abre ninguna conexión: eso ocurre en el primer uso (ver `check_database`).
     """
     if not (settings.db_server and settings.db_name):
         return None
     url = URL.create(
-        "mssql+mssqlpython",
+        "mssql+pyodbc",
         host=settings.db_server,
         port=1433,
         database=settings.db_name,
-        query={"authentication": settings.db_authentication, "Encrypt": "yes"},
+        query={
+            "driver": ODBC_DRIVER,
+            # En minúsculas: así SQLAlchemy no agrega Trusted_Connection=Yes
+            "authentication": settings.db_authentication,
+            "Encrypt": "yes",
+            "TrustServerCertificate": "no",
+            # Always Encrypted: el driver cifra los parámetros y descifra los resultados de las
+            # columnas cifradas. La llave (CMK) está en Key Vault y se usa con la misma identity.
+            "ColumnEncryption": "Enabled",
+            "KeyStoreAuthentication": "KeyVaultManagedIdentity",
+        },
     )
-    return create_engine(url, pool_pre_ping=True)
+    # hide_parameters: los valores (p. ej. nombres descifrados) no aparecen en errores ni logs
+    return create_engine(url, pool_pre_ping=True, hide_parameters=True)
 
 
 def build_session_factory(engine: Engine | None) -> sessionmaker[Session] | None:

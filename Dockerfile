@@ -1,8 +1,12 @@
 FROM python:3.14-slim
 
-# Librerías del sistema que necesita el driver de SQL Server (mssql-python)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libltdl7 libkrb5-3 libgssapi-krb5-2 \
+# ODBC Driver 18 para SQL Server, del repositorio oficial de Microsoft (la imagen es Debian 13).
+# libcurl lo usa el proveedor de Key Vault de Always Encrypted y no viene como dependencia.
+ADD https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb /tmp/
+RUN dpkg -i /tmp/packages-microsoft-prod.deb && rm /tmp/packages-microsoft-prod.deb \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
+        msodbcsql18 libcurl4t64 libgssapi-krb5-2 \
     && rm -rf /var/lib/apt/lists/*
 
 # uv como binario, copiado desde su imagen oficial

@@ -25,10 +25,10 @@ todavía no existe) y se prueba con Bruno/Postman.
 | Web | FastAPI (`fastapi run` / `fastapi dev`) |
 | Configuración | pydantic-settings, **solo variables de entorno** con prefijo `APP_` |
 | ORM | SQLAlchemy 2.1 (modelos tipados `Mapped[...]`) |
-| Driver SQL | **mssql-python** (driver oficial de Microsoft; ODBC incluido en el paquete) |
+| Driver SQL | **pyodbc** + **Microsoft ODBC Driver 18** (`mssql+pyodbc`). Se dejó mssql-python porque no soporta Always Encrypted |
 | JWT | PyJWT[crypto] (`PyJWKClient` con caché de claves) |
 | Tests / lint | pytest + pytest-cov (mínimo **90%**), ruff (line-length 100) |
-| Imagen | `python:3.14-slim` + libs del driver (`libltdl7`, `libkrb5-3`, `libgssapi-krb5-2`) |
+| Imagen | `python:3.14-slim` (Debian 13) + `msodbcsql18` del repo de Microsoft, `libcurl4t64` (proveedor de Key Vault) y `libgssapi-krb5-2` |
 
 ## Estructura: package by feature
 
@@ -128,7 +128,7 @@ La app **no lee archivos `.env`**: quien la ejecuta carga las variables (`uv run
 | `APP_LOG_LEVEL` | Nivel de los logs de `app.*` (las librerías van en INFO; `azure.*` en WARNING) |
 | `APP_DOCS_ENABLED` | Expone `/docs` |
 | `APP_DB_SERVER`, `APP_DB_NAME` | Azure SQL. Sin ellas la app arranca sin base (solo avisa en logs) |
-| `APP_DB_AUTHENTICATION` | `ActiveDirectoryMSI` en Azure (default), `ActiveDirectoryDefault` o `ActiveDirectoryInteractive` en local |
+| `APP_DB_AUTHENTICATION` | Keyword `Authentication` de ODBC. `ActiveDirectoryMsi` (default; `ActiveDirectoryMSI` también vale). Ya no hay modo local: la base solo funciona dentro de Azure |
 | `APP_AUTH_ISSUER` | `issuer` del `.well-known/openid-configuration` del tenant externo (copiar exacto; usa el tenant ID como subdominio) |
 | `APP_AUTH_JWKS_URI` | `jwks_uri` del mismo documento |
 | `APP_AUTH_AUDIENCE` | Client ID de la app registration de la **API** (`orders`) |
@@ -167,8 +167,9 @@ configuración **incompleta** no arranca (falla rápido a propósito).
   `tests/test_database.py` verifica que sigan alineados (incluido `DATETIME2`).
 - Migraciones en `migrations/`, numeradas y aplicadas **a mano por el usuario** (Query Editor):
   `01-dp3ddl.sql` (esquema), `02-orders-soft-delete.sql` (`Orders.deleted_at`),
-  `03-seed-products.sql` (productos de prueba, opcional). Un cambio de esquema = un archivo nuevo,
-  no editar los ya aplicados.
+  `03-seed-products.sql` (productos de prueba, opcional), `04-always-encrypted-keys.sql` (CMK,
+  CEK y permisos; ya aplicada, documenta el estado). Un cambio de esquema = un archivo nuevo, no
+  editar los ya aplicados.
 - Fechas: `utcnow()` (UTC **sin** zona horaria, como `DATETIME2`); no mezclar con fechas aware.
 - `Product`, `Order` y `OrderItem` viven en `app/orders/models.py`; `User` en `app/users/models.py`.
 - IDs con `NEWSEQUENTIALID()` y timestamps con `SYSUTCDATETIME()` los genera la base; el
@@ -177,7 +178,25 @@ configuración **incompleta** no arranca (falla rápido a propósito).
   en la base (`CREATE USER [dp3-appservice-orders] FROM EXTERNAL PROVIDER` + `db_datareader` /
   `db_datawriter`).
 - Al arrancar, `check_database()` hace `SELECT 1` **en un hilo en segundo plano** y escribe en los
-  logs `Database connection OK`, `FAILED` (con el error completo) o `not configured`.
+  logs `Database connection OK`, `FAILED` (con el error completo) o `not configured`. Ojo:
+  `SELECT 1` prueba la conexión, **no** el descifrado (eso se ve al leer `Users`).
+
+### Always Encrypted (`Users.first_name`, `Users.last_name`)
+
+- Objetivo: que quien consulte la base sin acceso a la llave (Query Editor, admins de SQL) vea los
+  nombres como binario. `Users.email` queda **legible** a propósito (se consulta en SQL).
+- Cifrado **aleatorizado**, sin enclaves: sobre esas columnas no hay `WHERE`, `ORDER BY`, `LIKE`,
+  índices ni estadísticas. La app no los necesita (busca por `tid` + `oid`).
+- Llaves: CMK `CMK_Orders` → RSA 3072 `orders-pii-kek` en `dp3-kv-crypto` (Standard, RBAC);
+  CEK `CEK_UsersNames` (AES-256, guardada cifrada en la base). La identity de la Web App tiene
+  *Key Vault Crypto User* sobre esa llave y `VIEW ANY COLUMN … DEFINITION` en la base.
+- Todo lo hace el driver (`ColumnEncryption=Enabled`, `KeyStoreAuthentication=KeyVaultManagedIdentity`):
+  el código sigue usando `str`. Reglas: valores siempre como **parámetros** (nunca literales en
+  SQL) y `hide_parameters=True` en el engine para que los nombres no lleguen a los logs.
+- Lo que necesita la llave (crear una CEK, cifrar o descifrar columnas con datos) se hace con
+  **SSMS** o PowerShell (`SqlServer`), nunca con el Query Editor. Lo que es solo metadato (CMK,
+  `CREATE TABLE … ENCRYPTED WITH` vacío, permisos) sí va en el Query Editor.
+- La llave vence el **2028-10-01**: rotarla antes (nueva versión + re-proteger la CEK con SSMS).
 
 ## Infraestructura relevante (Azure)
 
@@ -200,7 +219,9 @@ configuración **incompleta** no arranca (falla rápido a propósito).
    `Redirect` (recomendada; requiere puertos 1433–65535 entre VNets) o `Proxy` (solo 1433) **y
    aplicarla después de crear el private endpoint**. Con `Default` daba `TCP Provider: Timeout
    error [258]`. (El rango 11000–11999 es para el endpoint público, no para private endpoint.)
-4. **El driver necesita libs del sistema** en la imagen slim; sin ellas: `Failed to load the driver`.
+4. **El driver necesita paquetes del sistema** en la imagen slim (hoy `msodbcsql18` del repo de
+   Microsoft). El proveedor de Key Vault de Always Encrypted además necesita `libcurl`, que **no**
+   se instala como dependencia del driver.
 5. Diagnóstico de red desde dentro del App Service: consola Kudu (`getent hosts`, prueba TCP con
    `bash -c echo>/dev/tcp/IP/PUERTO`) o el *Network troubleshooter* del portal.
 6. En Git Bash, rutas que empiezan con `/` se reescriben (`C:/Program Files/Git/...`): usar
@@ -209,6 +230,11 @@ configuración **incompleta** no arranca (falla rápido a propósito).
    mssql). Para bloquear filas usar `.with_hint(Model, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")`.
 8. En Windows el reloj puede devolver el mismo valor en llamadas seguidas: en tests que dependen
    del orden por `created_at`, asignar fechas explícitas.
+9. **SQLAlchemy + pyodbc:** el parámetro `authentication` va en **minúsculas** en la URL; si no,
+   SQLAlchemy agrega `Trusted_Connection=Yes`, que choca con la managed identity.
+10. **La app llega a Key Vault por el private endpoint** (`10.4.0.4`, en `dp3-vnet-common`): la
+    zona `privatelink.vaultcore.azure.net` tiene que estar vinculada también a `dp3-vnet-orders`,
+    o la app resuelve la IP pública y el firewall del vault la rechaza.
 
 ## Tests
 
@@ -237,8 +263,9 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 
 ## Pendiente (siguiente trabajo)
 
-- Aplicar `migrations/02-orders-soft-delete.sql` (y opcionalmente `03-seed-products.sql`) en
-  Azure SQL **antes** de desplegar esta versión: el ORM ya consulta `Orders.deleted_at`.
+- Always Encrypted: desplegar la 0.6.0 con `Users` todavía en claro; luego, con la Web App
+  detenida, cifrar `first_name`/`last_name` con el asistente de SSMS (Randomized, `CEK_UsersNames`),
+  registrar el DDL final en `migrations/05-…` y alinear la collation en `app/users/models.py`.
 - `GET /api/v1/orders/{id}`; CRUD de productos; flujo de pago que pase órdenes a `confirmed`.
 - Tests de integración de los repositorios SQL (SQL Server en Docker).
 - CORS para `dp3-web-store` (solo su origen) cuando exista la SPA.

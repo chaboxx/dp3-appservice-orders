@@ -26,14 +26,22 @@ def test_timestamps_are_datetime2_in_sql_server() -> None:
     assert "created_at DATETIME2 NOT NULL" in ddl
 
 
-def test_engine_uses_managed_identity_without_password() -> None:
+def test_engine_uses_managed_identity_and_always_encrypted() -> None:
     settings = Settings(db_server="dp3-sql.database.windows.net", db_name="orders")
 
-    url = build_engine(settings).url
+    engine = build_engine(settings)
+    connect_args, _ = engine.dialect.create_connect_args(engine.url)
+    connection_string = connect_args[0]
 
-    assert url.drivername == "mssql+mssqlpython"
-    assert url.query["authentication"] == "ActiveDirectoryMSI"
-    assert url.password is None
+    assert engine.url.drivername == "mssql+pyodbc"
+    assert engine.url.password is None
+    assert "DRIVER={ODBC Driver 18 for SQL Server}" in connection_string
+    assert "Authentication=ActiveDirectoryMsi" in connection_string
+    assert "Trusted_Connection" not in connection_string
+    assert "ColumnEncryption=Enabled" in connection_string
+    assert "KeyStoreAuthentication=KeyVaultManagedIdentity" in connection_string
+    # los valores de los parámetros (nombres descifrados) no deben llegar a errores ni logs
+    assert engine.hide_parameters is True
 
 
 def test_no_engine_without_database_config() -> None:

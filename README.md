@@ -20,7 +20,7 @@ Hay dos entornos, `dev` y `prod`. La app lee su configuración **solo de variabl
 | `APP_DOCS_ENABLED` | `true`  | `false` | Expone `/docs` y `/openapi.json`     |
 | `APP_DB_SERVER`    | vacío   | `dp3-mssql-orders-server.database.windows.net` | Servidor de Azure SQL |
 | `APP_DB_NAME`      | vacío   | `dp3-mssql-orders` | Base de datos                   |
-| `APP_DB_AUTHENTICATION` | `ActiveDirectoryDefault` | `ActiveDirectoryMSI` | Autenticación con Entra (sin contraseña) |
+| `APP_DB_AUTHENTICATION` | —       | `ActiveDirectoryMsi` | Autenticación con la managed identity (sin contraseña) |
 | `APP_AUTH_*`       |         |         | Tenant de Entra External ID en el que confía la API (ver abajo) |
 
 Las plantillas `.env.dev.example` y `.env.prod.example` se suben a git. Las copias reales
@@ -33,12 +33,16 @@ cp .env.prod.example .env.prod
 
 ### Base de datos (Azure SQL)
 
-La app se conecta sin contraseña: en Azure con la **managed identity** de la Web App
-(`ActiveDirectoryMSI`) y en local con tu sesión de `az login` (`ActiveDirectoryDefault`).
+La app se conecta con **pyodbc + ODBC Driver 18** y sin contraseña, usando la **managed identity**
+de la Web App (`ActiveDirectoryMsi`). Las columnas `Users.first_name` y `Users.last_name` usan
+**Always Encrypted**: el driver las cifra y descifra con una llave de Key Vault que solo esa
+identity puede usar. Por eso la base **solo funciona dentro de Azure**; en local se deja
+`APP_DB_*` vacío y se usan repositorios en memoria.
+
 Al arrancar prueba la conexión (`SELECT 1`) y deja el resultado en los logs:
 
 ```
-INFO:app.database:Database connection OK (mssql+mssqlpython://...)
+INFO:app.database:Database connection OK (mssql+pyodbc://...)
 ERROR:app.database:Database connection FAILED (...)      # + el error completo del driver
 WARNING:app.database:Database not configured (...)        # sin APP_DB_SERVER / APP_DB_NAME
 ```
@@ -53,8 +57,9 @@ Editor del portal):
 | Archivo | Qué hace |
 |---|---|
 | `01-dp3ddl.sql` | Esquema: `Users`, `Products`, `Orders`, `OrderItem` |
-| `02-orders-soft-delete.sql` | Agrega `Orders.deleted_at` (soft delete). **Requerida** por esta versión |
+| `02-orders-soft-delete.sql` | Agrega `Orders.deleted_at` (soft delete) |
 | `03-seed-products.sql` | Productos de prueba (opcional) |
+| `04-always-encrypted-keys.sql` | Llaves de Always Encrypted (CMK, CEK) y permisos de la app. Ya aplicada; la CEK se crea con SSMS, no a mano |
 
 ### Autenticación (Entra ID / Entra External ID)
 
