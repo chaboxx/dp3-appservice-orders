@@ -26,3 +26,4 @@ class User(TimestampMixin, Base):
     last_name: Mapped[str | None] = mapped_column(Unicode(200, collation="Latin1_General_BIN2"))
     is_active: Mapped[bool] = mapped_column(server_default=text("1"))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime2)
+    city: Mapped[str | None] = mapped_column(Unicode(128))  # claim city (migrations/06), legible

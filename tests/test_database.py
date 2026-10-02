@@ -33,6 +33,7 @@ def test_encrypted_names_use_bin2_collation() -> None:
     assert "first_name NVARCHAR(200) COLLATE Latin1_General_BIN2 NULL" in ddl
     assert "last_name NVARCHAR(200) COLLATE Latin1_General_BIN2 NULL" in ddl
     assert "email NVARCHAR(320) NOT NULL" in ddl  # el email queda legible y con su collation
+    assert "city NVARCHAR(128) NULL" in ddl  # legible: el ETL agrupa por ciudad (migrations/06)
 
 
 def test_engine_uses_managed_identity_and_always_encrypted() -> None:

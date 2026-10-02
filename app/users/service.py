@@ -16,8 +16,9 @@ from app.users.repository import UserRepository
 # last_login_at no se escribe en cada request (sería un UPDATE por llamada), solo si pasó esto
 LAST_LOGIN_REFRESH = timedelta(minutes=15)
 
-# Largo de first_name / last_name en el DDL (NVARCHAR(200))
+# Largos en el DDL: first_name / last_name NVARCHAR(200), city NVARCHAR(128)
 NAME_MAX_LENGTH = 200
+CITY_MAX_LENGTH = 128
 
 
 class UserService:
@@ -35,8 +36,9 @@ class UserService:
                     entra_tenant_id=principal.tenant_id,
                     entra_object_id=principal.object_id,
                     email=principal.email,
-                    first_name=_truncate(principal.given_name),
-                    last_name=_truncate(principal.family_name),
+                    first_name=_truncate(principal.given_name, NAME_MAX_LENGTH),
+                    last_name=_truncate(principal.family_name, NAME_MAX_LENGTH),
+                    city=_truncate(principal.city, CITY_MAX_LENGTH),
                     is_active=True,
                     last_login_at=now,
                 )
@@ -56,8 +58,9 @@ def _sync_profile(user: User, principal: Principal) -> bool:
     """Copia al usuario los datos del token que cambiaron en Entra. True si hubo cambios."""
     profile = {
         "email": principal.email,
-        "first_name": _truncate(principal.given_name),
-        "last_name": _truncate(principal.family_name),
+        "first_name": _truncate(principal.given_name, NAME_MAX_LENGTH),
+        "last_name": _truncate(principal.family_name, NAME_MAX_LENGTH),
+        "city": _truncate(principal.city, CITY_MAX_LENGTH),
     }
     changed = False
     for field, value in profile.items():
@@ -67,5 +70,5 @@ def _sync_profile(user: User, principal: Principal) -> bool:
     return changed
 
 
-def _truncate(value: str | None) -> str | None:
-    return value[:NAME_MAX_LENGTH] if value else None
+def _truncate(value: str | None, max_length: int) -> str | None:
+    return value[:max_length] if value else None

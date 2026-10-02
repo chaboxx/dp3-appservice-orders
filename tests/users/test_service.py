@@ -17,6 +17,7 @@ PRINCIPAL = Principal(
     email="ana@example.com",
     given_name="Ana",
     family_name="Pérez",
+    city="Lima",
 )
 
 
@@ -34,6 +35,7 @@ def test_first_request_creates_the_user(service: UserService) -> None:
         PRINCIPAL.object_id,
     )
     assert (user.email, user.first_name, user.last_name) == ("ana@example.com", "Ana", "Pérez")
+    assert user.city == "Lima"
     assert user.is_active is True
     assert user.last_login_at is not None
 
@@ -47,10 +49,13 @@ def test_next_requests_return_the_same_user(service: UserService) -> None:
 def test_profile_changes_in_entra_are_synced(service: UserService) -> None:
     user = service.get_or_create(PRINCIPAL)
 
-    service.get_or_create(replace(PRINCIPAL, email="ana.perez@example.com", family_name=None))
+    service.get_or_create(
+        replace(PRINCIPAL, email="ana.perez@example.com", family_name=None, city="Arequipa")
+    )
 
     assert user.email == "ana.perez@example.com"
     assert user.last_name is None
+    assert user.city == "Arequipa"
 
 
 def test_last_login_is_refreshed_only_after_the_interval(service: UserService) -> None:

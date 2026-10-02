@@ -110,7 +110,7 @@ postman/           colección de Postman (sin OAuth todavía; ver "Pendiente")
 
 En cada request autenticado que use `CurrentUser` (órdenes y `/me`): busca `Users` por
 (`tid`, `oid`); si no existe lo crea (`email`, `given_name` → `first_name`, `family_name` →
-`last_name`); si existe, rechaza inactivos (403), sincroniza email/nombres y actualiza
+`last_name`, `city`); si existe, rechaza inactivos (403), sincroniza email/nombres/ciudad y actualiza
 `last_login_at` como máximo cada 15 minutos. Sin claim `email` → 403 (`Users.email` es NOT NULL).
 Dos primeros requests simultáneos: el segundo choca con `ux_users_entra_identity`, se captura en un
 savepoint y se devuelve el usuario ya creado.
@@ -168,8 +168,17 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 - Migraciones en `migrations/`, numeradas y aplicadas **a mano por el usuario** (Query Editor):
   `01-dp3ddl.sql` (esquema), `02-orders-soft-delete.sql` (`Orders.deleted_at`),
   `03-seed-products.sql` (productos de prueba, opcional), `04-always-encrypted-keys.sql` (CMK,
-  CEK y permisos) y `05-users-names-encrypted.sql` (cifra los nombres). Todas aplicadas. Un cambio
-  de esquema = un archivo nuevo, no editar los ya aplicados.
+  CEK y permisos), `05-users-names-encrypted.sql` (cifra los nombres) y `06-users-city.sql`
+  (`Users.city`, legible; la exige la app desde **0.7.0**: sin ella falla con `Invalid column
+  name 'city'`). Todas aplicadas. Un cambio de esquema = un archivo nuevo, no editar los ya
+  aplicados, y se aplica **antes** de desplegar la versión que lo usa.
+- Scripts de datos para el ETL (opcionales, no cambian el esquema): `07-seed-synthetic-orders.sql`
+  (12 meses de órdenes con estacionalidad; clientes del tenant ficticio
+  `DA7A0000-5EED-4000-8000-000000000000`, email `@dp3-synthetic.test`, sin nombres; incluye cómo
+  borrarlos), `08-simulate-scd-changes.sql` (cambia ciudad, precio y categoría con `updated_at`
+  para probar el SCD2; repetible, después de cada carga) y `09-synthetic-names-ssms.sql` (nombres
+  cifrados para esos clientes, con datos "sucios" a propósito; **solo SSMS** con Always Encrypted
+  y parametrización: un `DECLARE ... = N'literal'` por fila; archivo generado).
 - Fechas: `utcnow()` (UTC **sin** zona horaria, como `DATETIME2`); no mezclar con fechas aware.
 - `Product`, `Order` y `OrderItem` viven en `app/orders/models.py`; `User` en `app/users/models.py`.
 - IDs con `NEWSEQUENTIALID()` y timestamps con `SYSUTCDATETIME()` los genera la base; el
@@ -180,6 +189,21 @@ configuración **incompleta** no arranca (falla rápido a propósito).
 - Al arrancar, `check_database()` hace `SELECT 1` **en un hilo en segundo plano** y escribe en los
   logs `Database connection OK`, `FAILED` (con el error completo) o `not configured`. Ojo:
   `SELECT 1` prueba la conexión, **no** el descifrado (eso se ve al leer `Users`).
+
+### Lo que necesita saber el ETL (ADF + Databricks, proyecto aparte)
+
+- Carga incremental por **`updated_at`** (UTC): lo pone el ORM (`onupdate`) en cada cambio de la
+  app; un `UPDATE` a mano tiene que ponerlo él mismo o la carga no lo ve. Los borrados de órdenes
+  son soft delete (`deleted_at` + `updated_at`), así que llegan como cambios; un borrado físico no.
+  Los ítems no cambian después de crear la orden.
+- Dimensiones: `Users.city` (legible) es el atributo SCD2 de clientes; `Products.price` y
+  `category` el de productos. Los nombres son SCD1 (se sobrescriben desde el token).
+- `first_name` / `last_name` llegan como **binario** salvo que el linked service de ADF tenga
+  Always Encrypted (managed identity). Para eso la identity de ADF necesita usuario en la base +
+  `db_datareader` + `VIEW ANY COLUMN … DEFINITION`, *Key Vault Crypto User* y un managed private
+  endpoint a `dp3-kv-crypto` (firewall `Deny`). Descifrados quedan **en claro en el lake**:
+  protegerlos ahí (p. ej. column masks de Unity Catalog) o no descifrarlos si no hacen falta.
+- Los datos sintéticos (07–09) se distinguen por `entra_tenant_id = DA7A0000-5EED-4000-8000-000000000000`.
 
 ### Always Encrypted (`Users.first_name`, `Users.last_name`)
 
@@ -251,6 +275,13 @@ configuración **incompleta** no arranca (falla rápido a propósito).
     → `10.4.0.4`.
 11. **mssql-python no soporta Always Encrypted** (1.15.0): su lista de parámetros de conexión
     permitidos descarta `ColumnEncryption` y `KeyStoreAuthentication` sin dar error.
+12. **`NEWID()` dentro de `CHOOSE`/`CASE` se recalcula en cada rama** (y puede no caer en ninguna
+    y devolver NULL). En scripts con azar, guardar primero el número en una tabla temporal y
+    después usarlo en el `CASE`.
+13. **Escribir columnas cifradas en lote:** SSMS solo cifra variables `DECLARE @x tipo = N'literal'`
+    (misma línea, un literal, mismo tipo que la columna); no sirve `UPDATE … FROM otra_tabla`
+    porque SQL Server no tiene la llave. Para muchas filas: un bloque por fila separado con `GO`
+    (ver migrations/09).
 
 ## Tests
 
@@ -283,12 +314,17 @@ configuración **incompleta** no arranca (falla rápido a propósito).
   evita perder la llave y con ella los nombres). Opcional: limitar el rol *Crypto User* de la app
   a la llave `orders-pii-kek` en vez de a todo el vault.
 - Rotar `orders-pii-kek` antes del **2028-10-01** (vence ese día).
+- TDE con llave propia (CMK) en el servidor SQL: hoy es `ServiceManaged`. Requiere protección
+  contra purga en el vault, identity en el servidor con *Key Vault Crypto Service Encryption User*
+  y permitir "trusted Microsoft services" en el firewall del vault (hoy `bypass: None`). Usar una
+  llave aparte de `orders-pii-kek`.
 - `GET /api/v1/orders/{id}`; CRUD de productos; flujo de pago que pase órdenes a `confirmed`.
 - Tests de integración de los repositorios SQL (SQL Server en Docker).
 - CORS para `dp3-web-store` (solo su origen) cuando exista la SPA.
 - Agregar OAuth 2.0 a la colección de Postman (Bruno es el cliente de pruebas actual).
 - Seguridad: deshabilitar acceso público de SQL (`--enable-public-network false`) cuando ya no se
-  use el Query Editor; HTTPS only, TLS 1.2, FTP/basic auth off y restringir el sitio SCM.
+  use el Query Editor; en la Web App (HTTPS only y TLS 1.2 ya activos) falta apagar FTP/basic auth
+  (hoy `FtpsOnly`) y restringir el sitio SCM.
 - Opcional: `ui_locales=es-ES` desde los clientes; branding y Google como proveedor se configuran
   solo en Entra (no tocan el código).
 

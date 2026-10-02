@@ -1,6 +1,6 @@
 [project]
 name = "dp3-appservice-orders"
-version = "0.6.0"
+version = "0.7.0"
 description = "API de órdenes con FastAPI"
 readme = "README.md"
 requires-python = ">=3.14"
